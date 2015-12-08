@@ -1,0 +1,50 @@
+init module {
+	knowledge{
+		% determine when a bid from an agent is acceptable
+		acceptableBid(A,L,D,T) :- highestBid(A,V,L,D), acceptable(V,L,D,T).
+		% get highest bid, yet to be implemented.
+		highestBid(A,V,L,D) :- received(A, bid(V,L,D)).
+		% acceptance strategy yet to be implemented.
+		acceptable(V,L,D,T) :- V > -1.
+
+		assignedSent(L,D) :- sent(_, assigned(_,L,D)).
+		% determine if the deadline (e.g. 3) has been reached.
+		deadlinePassed(L,D,T) :- time(X), T1 is X - T, T1 >= 3.
+	}
+	beliefs{
+		time(0).
+	}
+	goals{
+
+	}
+}
+
+main module{
+	program{
+		%Assign task to Agent if it has placed an acceptable bid.
+		if a-goal( assigned(L,D,T) ), bel (acceptableBid(A,L,D,T)) then
+			insert(assigned(L,D,T)) + allother.send(assigned(A,L,D)).
+
+	}
+}
+
+event module {
+	program {
+		%% Keep track of time %%
+		if bel( time(T), T1 is T + 1 ) then insert ( not(time(T)), time(T1) ).
+		
+		%%%%% Message Processing %%%%%
+		forall bel ( assignedSent(L,D), received(A, bid(V,L,D))) do delete(received(A, bid(V,L,D))).
+		forall bel ( received(_, serviced(L,D)), sent(A, assigned(A1,L,D) ) ) do delete(sent(A, assigned(A1,L,D))).
+		forall bel ( received(_, serviced(L,D)), assigned(L,D,T) ) do delete(assigned(L,D,T)).
+		forall bel ( received(A, serviced(L,D))) do delete(received(A, serviced(L,D))). 
+		
+		% start the bidding when the first bid is received for a particular task.
+		forall bel ( received(_,bid(V,L,D)), not(bidStarted(L,D,T1)), time(T)) do insert(bidStarted(L,D,T)).	
+		% agents can bid until the deadline has passed. adopt the goal to assign an agent with the task.			
+		forall bel ( bidStarted(L,D,T), deadlinePassed(L,D,T)) do adopt(assigned(L,D,T)) + delete(bidStarted(L,D,T)).
+		
+		
+		
+	}
+}
