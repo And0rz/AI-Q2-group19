@@ -14,7 +14,9 @@ init module {
 		%when an assigned task has been completed
 		serviced(L,D) :- atFloor(L), dir(D), not(fButtonOn(L,D)).
 		%determine value of a bid to place
-		value(V,L,D) :- V = 0.
+		value(V,L,D):- onRoute(L,D), atFloor(Here), V is abs(Here-L).
+		value(V,L,D):- not(assigned(_,_,_)), atFloor(Here), V is abs(Here-L).
+		value(V,L,D):- V = 0.
 		
 	}
 	

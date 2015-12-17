@@ -1,0 +1,11 @@
+# Ignore everything
+*
+
+# But not these files...
+!.gitignore
+!cnpmgr.goal
+!elevator.elevator.mas2g
+!elevatoragent.goal
+
+# ...even if they are in subdirectories
+!*/

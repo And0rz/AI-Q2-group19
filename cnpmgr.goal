@@ -3,7 +3,10 @@ init module {
 		% determine when a bid from an agent is acceptable
 		acceptableBid(A,L,D,T) :- highestBid(A,V,L,D), acceptable(V,L,D,T).
 		% get highest bid, yet to be implemented.
-		highestBid(A,V,L,D) :- received(A, bid(V,L,D)).
+		highestBid(A,V,L,D) :- received(A, bid(V,L,D)),not((received(A2, bid(V2,L2,D2)),V<V2)).
+		%highestBid(A,V,L,D) :- received(A, bid(V,L,D)),A\=A2,not(received(A2, bid(V2,L2,D2))).%Bid is the highest if it's the only one
+		%highestBid(A,V,L,D) :- received(A, bid(V,L,D)).
+		
 		% acceptance strategy yet to be implemented.
 		acceptable(V,L,D,T) :- V > -1.
 
