@@ -1,9 +1,9 @@
 init module {
 	knowledge{
 		% determine when a bid from an agent is acceptable
-		acceptableBid(A,L,D,T) :- highestBid(A,V,L,D), acceptable(V,L,D,T).
+		acceptableBid(A,L,D,T) :- lowestBid(A,V,L,D), acceptable(V,L,D,T).
 		% get highest bid, yet to be implemented.
-		highestBid(A,V,L,D) :- received(A, bid(V,L,D)),not((received(A2, bid(V2,L2,D2)),V<V2)).
+		lowestBid(A,V,L,D) :- received(A, bid(V,L,D)),not((received(A2, bid(V2,L2,D2)),V>V2)).
 		%highestBid(A,V,L,D) :- received(A, bid(V,L,D)),A\=A2,not(received(A2, bid(V2,L2,D2))).%Bid is the highest if it's the only one
 		%highestBid(A,V,L,D) :- received(A, bid(V,L,D)).
 		
@@ -11,8 +11,12 @@ init module {
 		acceptable(V,L,D,T) :- V > -1.
 
 		assignedSent(L,D) :- sent(_, assigned(_,L,D)).
-		% determine if the deadline (e.g. 3) has been reached.
-		deadlinePassed(L,D,T) :- time(X), T1 is X - T, T1 >= 3.
+		% determine if the deadline for bidding (e.g. 3) has been reached.
+		deadlinePassed(L,D,T) :- time(X), T1 is X - T, T1 >= 2.
+		
+		% determine if the deadline for servicing has been reached (same as previous, just other constant)
+		deadlinePassedService(L,D,T) :- time(X), T1 is X - T, T1 >= 40.
+		
 	}
 	beliefs{
 		time(0).
@@ -45,9 +49,12 @@ event module {
 		% start the bidding when the first bid is received for a particular task.
 		forall bel ( received(_,bid(V,L,D)), not(bidStarted(L,D,T1)), time(T)) do insert(bidStarted(L,D,T)).	
 		% agents can bid until the deadline has passed. adopt the goal to assign an agent with the task.			
-		forall bel ( bidStarted(L,D,T), deadlinePassed(L,D,T)) do adopt(assigned(L,D,T)) + delete(bidStarted(L,D,T)).
+		forall bel ( bidStarted(L,D,T), deadlinePassed(L,D,T),time(Now)) do adopt(assigned(L,D,Now)) + delete(bidStarted(L,D,T)).
 		
-		
+		% if the assigned L+D combination hasn't been serviced after certain deadline
+		forall bel ( assigned(L,D,T), deadlinePassedService(L,D,T),sent(A, assigned(A1,L,D))) do insert(reassign(L,D))+allother.sendonce(reassign(A1,L,D)) + delete(assigned(L,D,T)).
+		forall bel (reassign(L,D),sent(A, assigned(A1,L,D))) do delete(sent(A, assigned(A1,L,D) )).
+		forall bel (reassign(L,D),not(sent(A, assigned(A1,L,D)))) do delete(reassign(L,D)).
 		
 	}
 }
