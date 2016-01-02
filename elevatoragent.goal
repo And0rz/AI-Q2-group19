@@ -5,94 +5,73 @@
 
 init module {
 	knowledge{
-		% onRoute succeeds when Level is in the current direction Dir relative to the floor the agent is at.
-		% Note that onRoute only succeeds when the elevator car is "docked", i.e. atFloor(Here) succeeds for
-		% some floor (see also the belief section).
-		onRoute(Level, Dir) :- atFloor(Here), dir(Dir), Diff is Level-Here, (Diff<0 -> Dir=down; Dir=up).
+		middle(Level):-floorCount(Floors),Level is ((Floors+1)/2).
+		
+		%noTurn succeeds when Level is in the same direction as it's direction light, because you always need to turn when at an extreme point being at one of those is treated as not having to turn
+		noTurn(Level, Dir) :- atFloor(Here), Here==1.
+		noTurn(Level,Dir):-atFloor(Here),floorCount(Floors),Here==Floors.
+		noTurn(Level, Dir) :- atFloor(Here), Diff is Level-Here, (Diff<0 -> Dir=down; Dir=up).
+		
+	
+		
 		elevatorFull :- people(N), capacity(M), N = M.
 		assigned(A,L,D) :- received(_, assigned(A,L,D)).
 		assignedToMe(L,D) :- received(_, assigned(A,L,D)),me(A).
 		%when an assigned task has been completed
 		serviced(L,D) :- atFloor(L), dir(D), not(fButtonOn(L,D)).
 		
-		nextDirection(Level,Dir):-assignedToMe(L2,D2),Distance is abs(L2-Level),not((assignedToMe(LOther,D3),
-				OtherDistance is abs(OtherLevel-Level), OtherDistance<Distance) ),
-				not((eButtonOn(LOther2),OtherDistance2 is abs(LOther2-Level), OtherDistance2<Distance)),Diff is L2-Level,(Diff<0 -> Dir=down;Dir=up).
-		nextDirection(Level,Dir):-eButtonOn(L2),not(L2==Level),Distance is abs(L2-Level),not((assignedToMe(LOther,D3),
-				OtherDistance is abs(OtherLevel-Level), OtherDistance<Distance) ),
-				not((eButtonOn(LOther2),OtherDistance2 is abs(LOther2-Level), OtherDistance2<Distance)),Diff is L2-Level,(Diff<0 -> Dir=down;Dir=up).
-		nextDirection(Level,up).
-		%determine value of a bid to place
+
+
+		%Check what the highest and lowest goals are
 		highestGoal(L):-assignedToMe(L,_),not((assignedToMe(L2,_),L<L2)),not((eButtonOn(L3),L<L3)).
 		highestGoal(L):-eButtonOn(L),not((assignedToMe(L2,_),L<L2)),not((eButtonOn(L3),L<L3)).
 		lowestGoal(L):-assignedToMe(L,_),not((assignedToMe(L2,_),L>L2)),not((eButtonOn(L3),L>L3)).
 		lowestGoal(L):-eButtonOn(L),not((assignedToMe(L2,_),L>L2)),not((eButtonOn(L3),L>L3)).
-		%onRouteBetter(Level,Dir):-carPosition(Here), dir(Dir), Diff is Level-Here, (Diff<0 -> Dir=down; Dir=up),highestGoal(Lh),lowestGoal(Ll),(Dir==down -> Level>=Ll;Level=<Lh).
-		%value(V,L,D):- not(assignedToMe(_,_)), carPosition(Here),floorTravelTime(FTT), V is FTT*abs(Here-L).
-		%value(V,L,D):- onRouteBetter(L,D),carPosition(Here),stopTime(ST),floorTravelTime(FTT),people(N),V is (N*ST+FTT*abs(Here-L)).
-		%value(V,L,D):- carPosition(Here),stopTime(ST),floorTravelTime(FTT),people(N),dir(Dir),highestGoal(Lh),lowestGoal(Ll)
-		%	,(Dir==up-> Dist is (abs(Level-Lh)+abs(Lh-Here));Dist is (abs(Level-Ll)+abs(Ll-Here))),(Dir==up->(Level<Ll->StopTime is 0;StopTime is ST*N/2);(Level>Lh->StopTime is 0;StopTime is ST*N/2)).
+		
+		%isExtreme(Level):-(lowestGoal(Level);highestGoal(Level)).
+		%reverseDirection(Direction,ReverseDirection):-(Direction==down->ReverseDirection=up,Direction=down).
+		%Find the amount of assigned but not yet serviced floors, used in bid calculation to make sure one elevator doesn't get assigned many more bids than others
 		amountAssigned(Val):-findall(Floor,assignedToMe(Floor,_),List),length(List,Val).
-		%amountAssigned(Val):-amountAssigned(Val,[]).
-		%amountAssigned(Val,Checked):-assignedToMe(L2,_),not(member(L2,Checked)),amountAssigned(V,[L2|Checked]),Val is V+1.
-		%amountAssigned(0,Checked):-not((assignedToMe(L2,_),not(member(L2,Checked)))).
 		
 		%Bid calculation, higher is worse, cases for full, empty without current tasks, 
 		%Full means don't take anything
 		value(9999999999999999999999999999999999999,L,D):-elevatorFull,!.
 		%Empty and no assigned means be extremely eager to take it, so heavily discount your cost calculation
-		value(V,L,D):-people(N),N=0,carPosition(Here),not(assignedToMe(_,_)),V is ((1/2)*abs(Here-L)),!.
+		value(V,L,D):-people(N),N=0,carPosition(Here),not(assignedToMe(_,_)),V is ((1/4)*abs(Here-L)),!.
+		%One more simple case: if we are already currently underway to that location
+		value(V,L,D):-dir(Dir),Dir=D,carPosition(Here),goingTo(L),V is ((1/2)*abs(Here-L)),!.
 		%Now come the more regular cases: A not full not empty car
 		%Split this by how well requested direction matches current direction and by how location matches current direction and level combination, so check wether it's in line with current path
 		%All following things currently don't' take into account that people will also get out on some stops for how the people amount weighting is done, can do that also by making a predicate that counts the amount of stops between 2 places, will need to test if this is needed
 		%First the best case scenario: the assignment is for a car that wants to go in the current direction and is "behind" the place we are currently going to, aka no direction change required,
 		%or we are currently at a level and the goal is in the correct direction
 		%In this case the cost is estimated as the  amount of people (both in car and assigned floors, assigned floors isnt people so underestimated) divided by #2# times the stopping cost plus the time it will take to reach the floor
-		value(V,L,D):-goingTo(CurTarget),carPosition(Here),dir(Dir),Dir=D,Diff is L-CurTarget, (Diff<0 -> Dir=down; Dir=up),people(N),amountAssigned(N2),V is ((N+N2)/2+abs(Here-L)),!.
-		value(V,L,D):-atFloor(Here),dir(Dir),people(N),amountAssigned(N2),Dir=D,Diff is L-Here, (Diff<0 -> Dir=down; Dir=up),V is ((N+N2)/2+abs(Here-L)),!.
+		value(V,L,D):-goingTo(CurTarget),carPosition(Here),dir(Dir),Dir=D,Diff is L-CurTarget, (Diff<0 -> Dir=down; Dir=up),people(N),amountAssigned(N2),V is (2*(N+N2/2)+abs(CurTarget-L)+abs(CurTarget-Here)),!.
+		value(V,L,D):-atFloor(Here),dir(Dir),people(N),amountAssigned(N2),Dir=D,Diff is L-Here, (Diff<0 -> Dir=down; Dir=up),V is (2*(N+N2/2)+abs(Here-L)),!.
 		%Now the case that the direction is correct overall but we have to go backwards to get the person, in that case cost is related to the cost of having to make all current inhabitants wait + the current assignments
 		
-		value(V,L,D):-goingTo(CurTarget),carPosition(Here),dir(Dir),Dir=D,Diff is L-CurTarget, (Diff>0 -> Dir=down; Dir=up),people(N),amountAssigned(N2),V is ((N+N2)/2+abs(Here-L)+(N+N2+1)*2*abs(Diff)),!.
-		value(V,L,D):-atFloor(Here),dir(Dir),people(N),amountAssigned(N2),Dir=D,Diff is L-Here, (Diff>0 -> Dir=down; Dir=up),V is ((N+N2)/2+abs(Here-L)+(N+N2+1)*2*abs(Diff)),!.
+		value(V,L,D):-goingTo(CurTarget),carPosition(Here),dir(Dir),Dir=D,Diff is L-CurTarget, (Diff>0 -> Dir=down; Dir=up),people(N),amountAssigned(N2),V is (2*(N+N2/2)+abs(Here-L)+((N+N2/2)/2+1)*2*abs(Diff)),!.
+		value(V,L,D):-atFloor(Here),dir(Dir),people(N),amountAssigned(N2),Dir=D,Diff is L-Here, (Diff>0 -> Dir=down; Dir=up),V is (2*(N+N2/2)+abs(Here-L)+((N+N2/2)/2+1)*2*abs(Diff)),!.
 		%Now the cases that the direction is incorrect, first the best case for this: the level is further than the current extreme anyway.
-		value(V,L,D):-atFloor(Here),dir(Dir),people(N),amountAssigned(N2),not(Dir=D),Diff is L-Here, (Diff>0 -> (highestGoal(L3),L3<L,lowestGoal(L4)); (lowestGoal(L3),L3>L,highestGoal(L4))),V is ((N+N2)/2+abs(Here-L)+2*abs(Here-L4)),!.
-		value(V,L,D):-goingTo(CurTarget),carPosition(Here),dir(Dir),people(N),amountAssigned(N2),not(Dir=D),Diff is L-Here, (Diff>0 -> (highestGoal(L3),L3<L,lowestGoal(L4)); (lowestGoal(L3),L3>L,highestGoal(L4))),V is ((N+N2)/2+abs(Here-L)+2*abs(Here-L4)),!.
+		value(V,L,D):-atFloor(Here),dir(Dir),people(N),amountAssigned(N2),not(Dir=D),Diff is L-Here, (Diff>0 -> (highestGoal(L3),L3<L); (lowestGoal(L3),L3>L)),V is (2*(N+N2/2)+2*abs(Here-L)),!.
+		value(V,L,D):-goingTo(CurTarget),carPosition(Here),dir(Dir),people(N),amountAssigned(N2),not(Dir=D),Diff is L-Here, (Diff>0 -> (highestGoal(L3),L3<L); (lowestGoal(L3),L3>L)),V is (2*(N+N2/2)+abs(Here-CurTarget)+2*abs(CurTarget-L)),!.
 		%Now anything that wants to go in the wrong direction but does not lay past the extreme case, assume you still go to the extreme first and then come back
-		value(V,L,D):-atFloor(Here),dir(Dir),people(N),amountAssigned(N2),not(Dir=D), (Dir==up -> highestGoal(L3); lowestGoal(L3)),V is (sqrt(N+N2)/2+abs(Here-L)+2*abs(L3-L)),!.
-		value(V,L,D):-goingTo(curTarget),carPosition(Here),dir(Dir),people(N),amountAssigned(N2),not(Dir=D), (Dir==up -> highestGoal(L3); lowestGoal(L3)),V is (sqrt(N+N2)/2+abs(Here-L)+2*abs(L3-L)),!.
+		value(V,L,D):-atFloor(Here),dir(Dir),people(N),amountAssigned(N2),not(Dir=D), (Dir==up -> highestGoal(L3); lowestGoal(L3)),V is (2*(N+N2/2)+abs(Here-L)+2*abs(L3-L)),!.
+		value(V,L,D):-goingTo(CurTarget),carPosition(Here),dir(Dir),people(N),amountAssigned(N2),not(Dir=D), (Dir==down -> highestGoal(L3); lowestGoal(L3)),V is (2*(N+N2/2)+abs(Here-L)+2*abs(L3-L)),!.
 		
 		%If nothing fits just bid the worst value
 		value(999999999999999999999999999999999999999,L,D).
 		
-		%value(9999999999999999999999999999999999999,L,D):-elevatorFull.
-		%value(V,L,D):- onRoute(L,D), carPosition(Here),goingTo(GoalLevel),people(N), V is (abs(Here-L)+N*abs(GoalLevel-Here)).
-		%value(V,L,D):- carPosition(Here),goingTo(GoalLevel),people(N), V is (abs(Here-L)+N*abs(GoalLevel-Here)).
-		%value(V,L,D):- not(assignedToMe(L2,D2)),people(N),N=0,carPosition(Here), V is abs(Here-L).
-		%value(V,L,D):- V is 99999999999999999999999999999999999999999999999999.
 		
-		minCostToGoTo(L):-costToGoTo(L,[],VOut1),not((costToGoTo(L,[],VOut1),VOut1>VOut2)).
-		%Used to find the order of stops given the current occupants of the elevator
-		costToGoTo(L,VOut):-costToGoTo(L,[],VOut).
-		costToGoTo(L,Checked,VOut):-not(member(L2,Checked)),eButtonOn(L2),people(N),carPosition(Here),costToGoTo(L,[L2|Checked],V),VOut is V+N*(abs(L2-Here)-abs(L2-L)).
-		costToGoTo(L,Checked,0).
-		%Used to find the bid for being assigned a floor with a certain direction, this is different from above because this must include stop time and expected wait time
-		costToAdd(L,Dir,Vaccu,Checked,VOut):-eButtonOn(L2),not(member(L2,Checked)),people(N),carPosition(Here),VOut is V+N*(abs(L2-Here)-abs(L2-L)).
-		costToAdd(L,Dir,Vaccu,Checked,VOut):-Vout is 0,not((eButtonOn(L2),not(member(L2,Checked)))).
-		
-		
-		%path([H|T]):- not(member(H,T)),eButtonOn(H),path(T).
-		%path([H|T]):- not(member(H,T)),assignedToMe(H,D),path(T).
-		%pathCost(L,VOut):-costToGoTo(L,[L|],VOut).
 		costToGoTo(L,Checked,VOut):-not(member(L2,Checked)),eButtonOn(L2),people(N),carPosition(Here),costToGoTo(L,[L2|Checked],V),VOut is V+N*(abs(L2-Here)-abs(L2-L)).
 		costToGoTo(L,Checked,0).
 		
-		%N*stoptime+N*av_difference*floortime is value of bid
 		
+		countRequests(Up,Down):-atFloor(Here),findall(UpFloor,(eButtonOn(UpFloor),UpFloor>Here),ListUp),length(ListUp,Up),findall(DownFloor,(eButtonOn(DownFloor),DownFloor<Here),ListDown),length(ListDown,Down).
 		
-		
-		floorTravelTime(4400).%An estimate of the time it takes to move 1 floor in ms, used for calculating cost of plans
-		stopTime(8000).%An estimate of the time a stop takes in ms, used for calculating cost of plans
-		
+		%Finds the direction with the most ebuttons, all ebuttons should be in the same direction but this generalizes it, ties are broken in favor of up
+		primaryDirection(Dir):-countRequests(Up,Down),(Up<Down->Dir=down;Dir=up).
+						
 		
 	}
 	
@@ -104,8 +83,9 @@ init module {
 		people(0).
 		% Initially, it is unknown whether doors are open or closed.
 		doorState(unknown).
-		time(0).
+		%time(0).
 		carPosition(0).
+		notStart(no).
 	}
 	goals{
 		atFloor(1), dir(up).
@@ -123,37 +103,67 @@ init module {
 }
 	
 main module {
-	program {		
+	program [order=linear] {	
 		% Select a random goal to service if the elevator is full
-		if a-goal(atFloor(L), dir(D)), bel( elevatorFull ) then goto(L, D).
+		%if a-goal(atFloor(L), dir(D)), bel( elevatorFull ) then goto(L, D).
+		if bel(eButtonOn(Level),elevatorFull,atFloor(Here),Diff is Level-Here,Distance is abs(Diff),(Diff<0 -> D=down; D=up)),
+		not(bel(eButtonOn(OtherLevel),OtherDistance is abs(OtherLevel-Here), OtherDistance<Distance)),
+		bel((highestGoal(Level)->DFin=down;(lowestGoal(Level)->DFin=up;DFin=D)))
+			then goto(Level,DFin)+(manager).send(servicing(Level,DFin)).
 		
-		% Goto the nearest floor that the agent wants to go to, people current in elevator first.
-		
-		
-		
-		%if a-goal( atFloor(Level), dir(Dir) ),
-		%	bel( atFloor(Here), Distance is abs(Level-Here) ),
-		%    not(a-goal( atFloor(OtherLevel),
-		%		OtherDistance is abs(OtherLevel-Here), OtherDistance<Distance) )
-		%then goto(Level, Dir).
-		
-		if a-goal( atFloor(Level)),
-			bel( atFloor(Here), Distance is abs(Level-Here),Diff is Level-Here,(Diff<0 -> D=down; D=up)),
-			not(a-goal(atFloor(Level),dir(Dir))),
-		    not(a-goal( atFloor(OtherLevel),
-				OtherDistance is abs(OtherLevel-Here), OtherDistance<Distance) )
-		then goto(Level, D).
-		
+		%If empty start with the closests, preferring slightly those further from the middle
 		if a-goal( atFloor(Level), dir(Dir) ),
-			bel( atFloor(Here), Distance is abs(Level-Here) ),
+			bel(people(0), atFloor(Here),middle(Mid),floorCount(Floors), Distance is (abs(Level-Here)-abs(Mid-Level)/Floors)),
 		    not(a-goal( atFloor(OtherLevel),
-				OtherDistance is abs(OtherLevel-Here), OtherDistance<Distance) )
-		then goto(Level, Dir).
+				OtherDistance is (abs(OtherLevel-Here)-abs(Mid-Level)/Floors), OtherDistance<Distance) )
+		then goto(Level, Dir)+(manager).send(servicing(Level,Dir)).
+		
+		%All the cases for choosing where to go, first the easiest: all goals are the same direction and the closest goal wants to go to the correct direction, or doesn't care about direction
+		if a-goal( atFloor(Level), dir(Dir) ),
+			bel( atFloor(Here), Diff is Level-Here,Distance is abs(Diff),noTurn(Level,Dir)),
+		    not(a-goal( atFloor(OtherLevel),
+				OtherDistance is abs(OtherLevel-Here), OtherDistance<Distance) ),
+			not(a-goal(atFloor(OtherLevel2),OtherDist is (OtherLevel2-Here),OtherSign is sign(OtherDist),not(OtherSign is sign(Diff))))
+		then goto(Level, Dir)+(manager).send(servicing(Level,Dir)).
+		
+		if bel(eButtonOn(Level)),
+			bel( atFloor(Here), Distance is abs(Level-Here),Diff is Level-Here,(Diff<0 -> D=down; D=up)),
+		    not(a-goal( atFloor(OtherLevel),
+				OtherDistance is abs(OtherLevel-Here), OtherDistance<Distance) ),
+			not(a-goal(atFloor(OtherLevel2),OtherDist is (OtherLevel2-Here),OtherSign is sign(OtherDist),not(OtherSign is sign(Diff)))),
+			bel((highestGoal(Level)->DFin=down;(lowestGoal(Level)->DFin=up;DFin=D)))
+			then goto(Level,DFin)+(manager).send(servicing(Level,DFin)).
+
+		%If not all goals are in the same direction find goals not more than a certain fraction of the distance to the highest goal in the wrong direction that do have correct directions
+		if a-goal( atFloor(Level), dir(Dir) ),
+			bel( atFloor(Here), Distance is abs(Level-Here),primaryDirection(Dir),(Dir==down->lowestGoal(ExLoc);highestGoal(ExLoc)),ExtremeDist is abs(ExLoc-Here),floorCount(Floors),
+			(Dir==down->(AllowedMin is min(Floors,Here+max(1,0.25*ExtremeDist)),Level=<AllowedMin);((AllowedMin is max(1,Here-max(1,0.25*ExtremeDist))),Level>=AllowedMin))),
+			not(a-goal( atFloor(OtherLevel),dir(OtherDir),
+				(Dir==down->(Level<OtherLevel,OtherLevel=<AllowedMin);(Level>OtherLevel,OtherLevel>=AllowedMin))))
+		then goto(Level, Dir)+(manager).send(servicing(Level,Dir)).
+		
+		if bel(eButtonOn(Level)),
+			bel( atFloor(Here), Distance is abs(Level-Here),primaryDirection(D)),
+		    not(bel( eButtonOn(OtherLevel),
+				 OtherDistance is abs(OtherLevel-Here), OtherDistance<Distance)),
+		bel((highestGoal(Level)->DFin=down;(lowestGoal(Level)->DFin=up;DFin=D)))
+			then goto(Level,DFin)+(manager).send(servicing(Level,DFin)).
+		
+		
+		%Fallback option, if no goals currently just start stealing others goals
+		if not(a-goal(atFloor(AnyLevel))),
+		bel(notStart(yes),fButtonOn(Level,Dir),atFloor(Here),Distance is abs(Level-Here)),
+		not(bel(fButtonOn(OtherLevel,OtherDir),OtherDistance is abs(OtherLevel-Here),OtherDistance<Distance))
+		then goto(Level,Dir)+(manager).send(servicing(Level,Dir)).
+		
 	}
 }
 
 event module {
 	program {
+		%Keep checking wether the current goals are correct
+		forall a-goal(atFloor(Level),dir(Dir)),not(bel(fButtonOn(Level,Dir))) do drop(atFloor(Level),dir(Dir)).
+		
 		%%%%%%% Percept Processing %%%%%%%
 		
 		%%Percepts only send once at the start of the simulation
@@ -163,10 +173,11 @@ event module {
 		
 		%% Number of people currently in the elevator
 		if bel( percept(people(N))), bel(people(Old_N)) then insert ( not(people(Old_N)), people(N)).
+		if bel(percept(people(N)),N>0,notStart(no)) then insert(not(notStart(no)),notStart(yes)).
 		
 		% The atFloor(Level) percept is received only when elevator has stopped at a floor Level.
 		forall bel( percept(atFloor(Level)), not(atFloor(Level)) ) do insert( atFloor(Level) ).
-		forall bel(percept(atFloor(_)),goingTo(Level)) do delete (goingTo(Level)).
+		forall bel(percept(atFloor(Level)),goingTo(Level)) do delete (goingTo(Level)).
 		forall bel( atFloor(Level), not(percept(atFloor(Level))) ) do delete( atFloor(Level) ).
 		
 		% The doorState percept is received only if the door state has changed.
@@ -185,9 +196,9 @@ event module {
 		
 		% The eButton(Level) percept is received when the elevator button on floor Level has been pressed.
 		% In that case, the agent will adopt a goal to service that floor. It is ASSUMED that a button for a floor is
-		% pressed that is "on route", i.e. in the direction the elevator is currently travelling.
-		%forall bel( percept(eButtonOn(Level)), dir(Dir) ) do adopt( atFloor(Level), dir(Dir) ).
-		forall bel( percept(eButtonOn(Level)),dir(Dir)) do adopt( atFloor(Level),dir(Dir)).
+		% pressed that is "on route", i.e. in the direction the elevator is currently travelling. Actualy isn't used that much like this because 
+		forall bel( percept(eButtonOn(Level))) do adopt( atFloor(Level)).
+		
 		
 		% adopt goal to service a floor if the manager assigns that task to the elevator.
 		forall bel( assigned(A,L,D), me(A) ) do adopt (atFloor(L), dir(D)).
@@ -201,9 +212,10 @@ event module {
 		% inform manager that you have completed a task
 		if bel( serviced(L,D) ) then allother.sendonce(serviced(L,D)).
 		% delete serviced message after floor has  been serviced
-		forall bel( sent(A, serviced(L,D)), not(atFloor(L))) do delete(sent(A, serviced(L,D))).
-		forall bel(received(manager,reassign(A,L,D)),me(A)) do drop(atFloor(L),dir(D))+delete(received(manager, assigned(A,L,D)))+delete(received(manager,reassign(A,L,D))).
-		forall bel(received(manager,reassign(A,L,D))) do delete(received(manager, assigned(A,L,D)))+delete(received(manager,reassign(A,L,D))).
+		forall bel( sent(A, serviced(L,D)), not(atFloor(L))) do delete(sent(A, serviced(L,D)))+drop(atFloor(L),dir(D)).
+		forall bel(received(manager,reassign(A,L,D)),me(A)) do drop(atFloor(L),dir(D))+delete(received(manager, assigned(A,L,D))).
+		forall bel(received(manager,reassign(_,L,D)),received(_,assigned(A,L,D))) do delete(received(manager, assigned(A,L,D))).
+		forall bel(received(manager,reassign(A,L,D)),not(received(_,assigned(_,L,D)))) do delete(received(manager,reassign(A,L,D))).
 		
 
 		% Send a bid, if the task is not already assigned

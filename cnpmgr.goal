@@ -4,18 +4,18 @@ init module {
 		acceptableBid(A,L,D,T) :- lowestBid(A,V,L,D), acceptable(V,L,D,T).
 		% get highest bid, yet to be implemented.
 		lowestBid(A,V,L,D) :- received(A, bid(V,L,D)),not((received(A2, bid(V2,L2,D2)),V>V2)).
-		%highestBid(A,V,L,D) :- received(A, bid(V,L,D)),A\=A2,not(received(A2, bid(V2,L2,D2))).%Bid is the highest if it's the only one
-		%highestBid(A,V,L,D) :- received(A, bid(V,L,D)).
 		
-		% acceptance strategy yet to be implemented.
+		% acceptance strategy originally planned, however this is effectively done now through reassigning, if you reassign no bid ever needs to be unacceptable, 
+		% a task for which all bids are bad will not be done for a while, then later reassign deadline will be reached and it will all be redone, still the acceptable was already
+		%in the predicates, so I left it here
 		acceptable(V,L,D,T) :- V > -1.
 
 		assignedSent(L,D) :- sent(_, assigned(_,L,D)).
 		% determine if the deadline for bidding (e.g. 3) has been reached.
-		deadlinePassed(L,D,T) :- time(X), T1 is X - T, T1 >= 2.
+		deadlinePassed(L,D,T) :- time(X), T1 is X - T, T1 >= 3.
 		
 		% determine if the deadline for servicing has been reached (same as previous, just other constant)
-		deadlinePassedService(L,D,T) :- time(X), T1 is X - T, T1 >= 40.
+		deadlinePassedService(L,D,T) :- time(X), T1 is X - T, T1 >= 10.
 		
 	}
 	beliefs{
@@ -42,10 +42,10 @@ event module {
 		
 		%%%%% Message Processing %%%%%
 		forall bel ( assignedSent(L,D), received(A, bid(V,L,D))) do delete(received(A, bid(V,L,D))).
-		forall bel ( received(_, serviced(L,D)), sent(A, assigned(A1,L,D) ) ) do delete(sent(A, assigned(A1,L,D))).
-		forall bel ( received(_, serviced(L,D)), assigned(L,D,T) ) do delete(assigned(L,D,T)).
-		forall bel ( received(A, serviced(L,D))) do delete(received(A, serviced(L,D))). 
-		
+		forall bel ( received(_, servicing(L,D)), sent(A, assigned(A1,L,D) ) ) do delete(sent(A, assigned(A1,L,D))).
+		forall bel ( received(_, servicing(L,D)), assigned(L,D,T) ) do delete(assigned(L,D,T)).
+		forall bel ( received(A, servicing(L,D))) do delete(received(A, servicing(L,D))). 
+				
 		% start the bidding when the first bid is received for a particular task.
 		forall bel ( received(_,bid(V,L,D)), not(bidStarted(L,D,T1)), time(T)) do insert(bidStarted(L,D,T)).	
 		% agents can bid until the deadline has passed. adopt the goal to assign an agent with the task.			
@@ -54,7 +54,7 @@ event module {
 		% if the assigned L+D combination hasn't been serviced after certain deadline
 		forall bel ( assigned(L,D,T), deadlinePassedService(L,D,T),sent(A, assigned(A1,L,D))) do insert(reassign(L,D))+allother.sendonce(reassign(A1,L,D)) + delete(assigned(L,D,T)).
 		forall bel (reassign(L,D),sent(A, assigned(A1,L,D))) do delete(sent(A, assigned(A1,L,D) )).
-		forall bel (reassign(L,D),not(sent(A, assigned(A1,L,D)))) do delete(reassign(L,D)).
+		if bel (reassign(L,D),not(sent(A, assigned(A1,L,D)))) then delete(reassign(L,D)).
 		
 	}
 }
